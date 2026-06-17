@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Iqra University AI Counselor</title>
+  <style>
+    :root {
+      --primary: #0b5cab;
+      --primary-dark: #084a8a;
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .demo-note {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    #chat-launcher {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: none;
+      background: var(--primary);
+      color: #fff;
+      font-size: 26px;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(11, 92, 171, 0.35);
+      z-index: 1000;
+    }
+    #chat-launcher:hover { background: var(--primary-dark); }
+    #chat-panel {
+      position: fixed;
+      bottom: 96px;
+      right: 24px;
+      width: min(400px, calc(100vw - 32px));
+      height: min(560px, calc(100vh - 120px));
+      background: var(--card);
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      z-index: 1000;
+    }
+    #chat-panel.open { display: flex; }
+    .chat-header {
+      background: var(--primary);
+      color: #fff;
+      padding: 16px;
+    }
+    .chat-header h2 { margin: 0; font-size: 16px; }
+    .chat-header p { margin: 4px 0 0; font-size: 12px; opacity: 0.9; }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg {
+      max-width: 88%;
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .msg.bot {
+      align-self: flex-start;
+      background: #eef4fc;
+      border-bottom-left-radius: 4px;
+      white-space: normal;
+    }
+    .msg.bot p { margin: 0 0 8px; }
+    .msg.bot p:last-child { margin-bottom: 0; }
+    .msg.bot ul { margin: 0 0 8px; padding-left: 18px; }
+    .msg.bot li { margin-bottom: 4px; }
+    .msg.bot strong { font-weight: 600; }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--primary);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .ctas {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .cta {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--primary);
+      border: 1px solid var(--primary);
+      text-decoration: none;
+    }
+    .chat-input {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--border);
+    }
+    #user-input {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 14px;
+      outline: none;
+    }
+    #user-input:focus { border-color: var(--primary); }
+    #send-btn {
+      border: none;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 999px;
+      padding: 0 18px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .typing {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 0 16px 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-note">Embed: host this page or iframe /static/widget.html — API at same origin</div>
+
+  <button id="chat-launcher" aria-label="Open chat">💬</button>
+
+  <div id="chat-panel" role="dialog" aria-label="AI Counselor">
+    <div class="chat-header">
+      <h2>AI Education Counselor</h2>
+      <p>Iqra University · Chak Shahzad Campus</p>
+    </div>
+    <div id="messages"></div>
+    <div class="typing" id="typing" hidden>Counselor is typing…</div>
+    <form class="chat-input" id="chat-form">
+      <input id="user-input" type="text" placeholder="Ask about programs, fees, admissions…" autocomplete="off" />
+      <button type="submit" id="send-btn">Send</button>
+    </form>
+  </div>
+
+  <script>
+    const API = window.COUNSELOR_API || "";
+    let sessionId = null;
+
+    const panel = document.getElementById("chat-panel");
+    const launcher = document.getElementById("chat-launcher");
+    const messages = document.getElementById("messages");
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("user-input");
+    const sendBtn = document.getElementById("send-btn");
+    const typing = document.getElementById("typing");
+
+    launcher.addEventListener("click", async () => {
+      panel.classList.toggle("open");
+      if (panel.classList.contains("open") && !sessionId) {
+        await startSession();
+      }
+    });
+
+    function renderBotHtml(text) {
+      const cleaned = text
+        .replace(/\[\d+(?:,\s*\d+)*\]/g, "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      const lines = cleaned.split("\n");
+      const parts = [];
+      let inList = false;
+
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+        const bullet = line.match(/^(?:\*|•|-)\s+(.*)$/);
+        if (bullet) {
+          if (!inList) {
+            parts.push("<ul>");
+            inList = true;
+          }
+          const item = bullet[1].replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+          parts.push(`<li>${item}</li>`);
+        } else {
+          if (inList) {
+            parts.push("</ul>");
+            inList = false;
+          }
+          if (line.trim()) {
+            const paragraph = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+            parts.push(`<p>${paragraph}</p>`);
+          }
+        }
+      }
+      if (inList) parts.push("</ul>");
+      return parts.join("");
+    }
+
+    function addMessage(text, role, ctas = []) {
+      const div = document.createElement("div");
+      div.className = `msg ${role}`;
+      if (role === "bot") {
+        div.innerHTML = renderBotHtml(text);
+      } else {
+        div.textContent = text;
+      }
+      if (ctas.length && role === "bot") {
+        const ctaWrap = document.createElement("div");
+        ctaWrap.className = "ctas";
+        ctas.slice(0, 4).forEach((c) => {
+          const a = document.createElement("a");
+          a.className = "cta";
+          a.href = c.url;
+          a.target = "_blank";
+          a.rel = "noopener";
+          a.textContent = c.label;
+          ctaWrap.appendChild(a);
+        });
+        div.appendChild(ctaWrap);
+      }
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    async function startSession() {
+      sendBtn.disabled = true;
+      typing.hidden = false;
+      try {
+        const res = await fetch(`${API}/session/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Could not start session");
+        sessionId = data.session_id;
+        addMessage(data.reply, "bot", data.ctas || []);
+        input.focus();
+      } catch (e) {
+        addMessage("Could not connect to counselor. Is the API running?", "bot");
+      } finally {
+        typing.hidden = true;
+        sendBtn.disabled = false;
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text || !sessionId) return;
+      input.value = "";
+      addMessage(text, "user");
+      sendBtn.disabled = true;
+      typing.hidden = false;
+      try {
+        const res = await fetch(`${API}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, message: text }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Chat failed");
+        addMessage(data.reply, "bot", data.ctas || []);
+      } catch (e) {
+        addMessage("Sorry, something went wrong. Please try again.", "bot");
+      } finally {
+        typing.hidden = true;
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>
