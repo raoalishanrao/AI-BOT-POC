@@ -37,10 +37,12 @@ Your role matches a virtual admissions counselor:
 4. Answer questions about programs, fees, scholarships, admissions, and policies using ONLY the provided knowledge context.
 5. Guide interested students toward next steps (apply, inquiry, speak with admissions).
 6. Remember what the student already shared — never ask for the same information twice.
-7. Contact details (name, email, phone) must feel optional and human — never like a registration form or CRM bot.
-   - When you need contact info, ask for ALL missing items together in one warm sentence (not one-by-one).
-   - Lead with value: e.g. "I can have admissions email you the fee sheet" or "they can call you about scholarships" — not "so I can assist you better."
-   - Help first. Do not ask for contact on every message. At most one light invite every few turns.
+7. Contact details (name, email or WhatsApp) must feel optional and human — never like a registration form or CRM bot.
+   - On the student's SECOND message, answer their question first, then on a separate line at the end ask for their name and email or WhatsApp (to share brochures, fee sheets, or follow up).
+   - When you need contact info later, ask for ALL still-missing items together (not one-by-one).
+   - Email OR WhatsApp is enough — do not insist on both.
+   - Lead with value: e.g. "I can have admissions email you the fee sheet" or "they can WhatsApp you the brochure" — not "so I can assist you better."
+   - Help first on the first student message — do not ask for contact yet.
    - If they already shared name, do not ask for name again. Never use robotic repeated phrases.
 8. You may give useful answers even before all contact details are collected.
 
@@ -48,8 +50,9 @@ Counseling rules:
 - Base factual claims on the knowledge context. Compare programs when asked.
 - Explain WHY a program fits the student's background, interests, and goals.
 - Include fees (PKR) and entry criteria when relevant and available in context.
-- Answer the student's latest question directly first — do not append unrelated recaps.
-- Contact info is stored in the system — never repeat it back unless they ask to confirm.
+- Answer first, then ask — any question to the student must be on its own line at the end after a blank line.
+- Contact info is stored in the system — never thank them for sharing it, never repeat it back unless they ask to confirm.
+- The opening welcome was already shown — never repeat your full introduction on later messages.
 - Program recommendations belong when interests change or they ask — not on every message.
 - Mention apply/admissions next steps only when they show interest, not after every reply.
 
@@ -201,10 +204,24 @@ def _profile_for_prompt(profile: StudentProfile) -> str:
     return "\n".join(parts)
 
 
+def _is_greeting_only(message: str) -> bool:
+    text = message.strip()
+    if len(text) > 50:
+        return False
+    if text.lower() in {"hi", "hello", "hey", "salam", "aoa", "aslam o alaikum"}:
+        return True
+    return bool(
+        re.match(
+            r"^(?:hi|hello|hey|salam|assalam(?:u)?\s*alaikum|good\s+(?:morning|afternoon|evening))"
+            r"[\s!.,?]*$",
+            text,
+            re.I,
+        )
+    )
+
+
 def _build_ctas(state: SessionState) -> list[dict[str, str]]:
-    if state.lead_status not in {"interested", "captured"}:
-        return []
-    if state.stage != "lead_capture" and state.lead_status != "captured":
+    if state.stage != "lead_capture" and state.lead_status not in {"interested", "captured"}:
         return []
 
     ctas = [
@@ -218,12 +235,18 @@ def _build_ctas(state: SessionState) -> list[dict[str, str]]:
     return ctas
 
 
+def _user_turn_count(state: SessionState) -> int:
+    return sum(1 for m in state.messages if m["role"] == "user")
+
+
 def _should_nudge_contact(state: SessionState, profile: StudentProfile) -> bool:
     if profile.has_contact_info():
         return False
     if state.contact_nudges >= 2:
         return False
-    user_turns = sum(1 for m in state.messages if m["role"] == "user")
+    user_turns = _user_turn_count(state)
+    if user_turns == 2:
+        return True
     if user_turns < 2:
         return False
     if state.lead_status in {"warm", "interested", "captured"}:
@@ -231,7 +254,7 @@ def _should_nudge_contact(state: SessionState, profile: StudentProfile) -> bool:
     return user_turns >= 3 and user_turns % 2 == 0
 
 
-def _contact_guidance(profile: StudentProfile, should_nudge: bool) -> str:
+def _contact_guidance(profile: StudentProfile, should_nudge: bool, user_turns: int) -> str:
     missing = profile.contact_fields_missing()
     if not missing:
         return "Contact info is complete. Do not ask for it."
@@ -240,11 +263,18 @@ def _contact_guidance(profile: StudentProfile, should_nudge: bool) -> str:
             "Do NOT ask for contact details this turn. Focus only on answering and helping. "
             "Be genuinely useful — build trust first."
         )
+    if user_turns == 2:
+        return (
+            "This is the student's second message. First answer their question fully. "
+            "Then add a blank line and ONE warm question on its own line asking for their name "
+            "and email or WhatsApp (so admissions can share brochures, fee sheets, or follow up). "
+            "Email OR WhatsApp is enough."
+        )
     fields = " and ".join(missing)
     return (
         f"Still missing: {fields}. In ONE brief, warm sentence, invite them to share "
         f"{'these' if len(missing) > 1 else 'this'} together — optional tone, mention a clear benefit "
-        "(fee details, scholarship info, or admissions callback). "
+        "(fee details, scholarship info, or admissions follow-up via email or WhatsApp). "
         "Never ask field-by-field. Never say 'assist you better' or 'send you updates'."
     )
 
@@ -281,20 +311,29 @@ def _generate_reply(
     history: str,
     rag_context: str,
     state: SessionState,
+    contact_just_collected: bool = False,
 ) -> str:
     missing_contact = profile.contact_fields_missing()
     missing_profile = profile.profiling_fields_missing()
+    user_turns = _user_turn_count(state)
     should_nudge = _should_nudge_contact(state, profile)
     simple = _is_simple_factual_query(message)
     stage_guidance = {
         "introduction": (
             "Welcome warmly. Answer what they asked. "
-            "Do not ask for email or phone yet — just be helpful."
+            "Do not ask for email, WhatsApp, or name yet — just be helpful."
         ),
-        "contact_collection": _contact_guidance(profile, should_nudge),
+        "contact_collection": _contact_guidance(profile, should_nudge, user_turns),
         "profiling": (
             f"Learn about their background. Missing: "
-            f"{', '.join(missing_profile) if missing_profile else 'none — move to recommendations'}."
+            f"{', '.join(missing_profile) if missing_profile else 'none — move to recommendations'}. "
+            "Give any helpful context first, then ask ONE profiling question on its own line at the end."
+            + (
+                " Contact was just saved — do NOT thank them for sharing details or mention "
+                "name, email, or phone."
+                if contact_just_collected
+                else ""
+            )
         ),
         "recommending": (
             "Recommend 1–3 best-fit programs with reasoning, entry requirements, fees if known."
@@ -309,11 +348,24 @@ def _generate_reply(
         ),
         "completed": "Brief friendly sign-off. Summarize top program pick only if obvious.",
     }
-    if simple:
+    if user_turns == 1 and _is_greeting_only(message):
         stage_guidance[state.stage] = (
-            "Simple factual question. Reply in 1–3 sentences. "
-            "No greetings, no name, no contact recap, no program recap, no links."
+            "The student only said hello. Your welcome message is already visible above. "
+            "Reply in 1–2 short sentences. Do NOT re-introduce yourself. "
+            "Put your question on its own line at the end, e.g. a blank line then 'What would you like to know?'"
         )
+    elif simple:
+        if user_turns == 2 and should_nudge and not profile.has_contact_info():
+            stage_guidance[state.stage] = (
+                "Simple factual question. Reply in 1–3 sentences with the answer first. "
+                "Then a blank line and ONE brief question on its own line for name and email or WhatsApp. "
+                "No greetings, no contact recap, no program recap, no links."
+            )
+        else:
+            stage_guidance[state.stage] = (
+                "Simple factual question. Reply in 1–3 sentences. "
+                "No greetings, no name, no contact recap, no program recap, no links."
+            )
 
     prompt = f"""Session stage: {state.stage}
 Lead status: {state.lead_status}
@@ -341,10 +393,9 @@ Respond as the counselor."""
 
 def _greeting() -> str:
     return (
-        "Hello! I'm your AI Education Counselor for Iqra University, Chak Shahzad Campus. "
-        "Whether you're exploring programs, fees, scholarships, or just figuring out what fits you — "
-        "I'm happy to help.\n\n"
-        "What would you like to know today?"
+        "Welcome! I'm your AI Education Counselor for Iqra University, Chak Shahzad Campus. "
+        "I can help you explore programs, admissions, fees, scholarships, and campus life.\n\n"
+        "How can I assist you today?"
     )
 
 
@@ -373,6 +424,8 @@ def chat(session_id: str, message: str, match_count: int | None = None) -> Couns
     if not message:
         raise ValueError("Message cannot be empty")
 
+    had_contact = state.profile.has_contact_info()
+
     history = _history_text(state.messages)
     append_message(state, "user", message)
 
@@ -381,6 +434,8 @@ def chat(session_id: str, message: str, match_count: int | None = None) -> Couns
     merged_updates = {**updates, **{k: v for k, v in hints.items() if k not in updates or not updates[k]}}
     if merged_updates:
         state.profile = state.profile.merge(merged_updates)
+
+    contact_just_collected = not had_contact and state.profile.has_contact_info()
 
     sync_session_user_and_lead(state)
 
@@ -398,6 +453,7 @@ def chat(session_id: str, message: str, match_count: int | None = None) -> Couns
         history=_history_text(state.messages),
         rag_context=rag_context,
         state=state,
+        contact_just_collected=contact_just_collected,
     )
 
     if _should_nudge_contact(state, state.profile) and not state.profile.has_contact_info():
@@ -409,12 +465,11 @@ def chat(session_id: str, message: str, match_count: int | None = None) -> Couns
         merged = set(state.recommended_programs)
         merged.update(programs)
         state.recommended_programs = sorted(merged)[:8]
-        state.profile = state.profile.merge({"interested_programs": state.recommended_programs})
 
     append_message(state, "assistant", reply)
     _update_stage(state, message)
 
-    if state.profile.lead_contact_ready() and state.lead_status != "captured":
+    if state.profile.has_contact_info() and state.lead_status == "interested":
         state.lead_status = "captured"
 
     sync_session_user_and_lead(state)

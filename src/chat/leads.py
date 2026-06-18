@@ -43,10 +43,14 @@ def extract_contact_hints(message: str) -> dict[str, str]:
 
 def qualify_lead_status(profile: StudentProfile, message: str, current_status: str) -> str:
     score = detect_lead_score(message)
-    if profile.lead_contact_ready():
+    has_contact = profile.has_contact_info()
+
+    if score >= 3 and has_contact:
         return "captured"
     if score >= 3 or current_status == "interested":
         return "interested"
+    if has_contact:
+        return "warm"
     if score >= 1:
         return "warm"
     return current_status or "new"

@@ -49,6 +49,17 @@ GEMINI_PROFILE_MODEL = os.getenv("GEMINI_PROFILE_MODEL", GEMINI_CHAT_MODEL)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_CHAT_MODEL = os.getenv("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile")
 GROQ_PROFILE_MODEL = os.getenv("GROQ_PROFILE_MODEL", "llama-3.1-8b-instant")
+GROQ_CHAT_FALLBACK_MODELS = os.getenv(
+    "GROQ_CHAT_FALLBACK_MODELS", "llama-3.1-8b-instant,openai/gpt-oss-20b"
+)
+GROQ_PROFILE_FALLBACK_MODELS = os.getenv(
+    "GROQ_PROFILE_FALLBACK_MODELS", "llama-3.1-8b-instant,openai/gpt-oss-20b"
+)
+CHAT_FALLBACK_TO_GEMINI = os.getenv("CHAT_FALLBACK_TO_GEMINI", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 CHAT_MATCH_COUNT = int(os.getenv("CHAT_MATCH_COUNT", "12"))
 
 # Ingest

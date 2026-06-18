@@ -156,7 +156,7 @@
 
   <button id="chat-launcher" aria-label="Open chat">💬</button>
 
-  <div id="chat-panel" role="dialog" aria-label="AI Counselor">
+  <div id="chat-panel" class="open" role="dialog" aria-label="AI Counselor">
     <div class="chat-header">
       <h2>AI Education Counselor</h2>
       <p>Iqra University · Chak Shahzad Campus</p>
@@ -185,6 +185,9 @@
       panel.classList.toggle("open");
       if (panel.classList.contains("open") && !sessionId) {
         await startSession();
+      }
+      if (panel.classList.contains("open")) {
+        input.focus();
       }
     });
 
@@ -297,6 +300,8 @@
         input.focus();
       }
     });
+
+    startSession();
   </script>
 </body>
 </html>

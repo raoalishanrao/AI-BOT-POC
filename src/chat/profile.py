@@ -83,14 +83,12 @@ class StudentProfile:
         missing: list[str] = []
         if not self.name:
             missing.append("name")
-        if not self.email:
-            missing.append("email")
-        if not self.phone:
-            missing.append("phone")
+        if not self.email and not self.phone:
+            missing.append("email or WhatsApp number")
         return missing
 
     def has_contact_info(self) -> bool:
-        return bool(self.name and self.email and self.phone)
+        return bool(self.name and (self.email or self.phone))
 
     def profiling_fields_missing(self) -> list[str]:
         missing: list[str] = []
@@ -108,10 +106,8 @@ class StudentProfile:
         return has_background and has_goals
 
     def lead_contact_ready(self) -> bool:
-        has_name = bool(self.name)
-        has_contact = bool(self.email or self.phone)
-        has_program = bool(self.interested_programs)
-        return has_name and has_contact and has_program
+        """Enough contact info to sync a lead record (does not require program choice)."""
+        return bool(self.name and (self.email or self.phone))
 
     def to_context(self) -> str:
         lines: list[str] = []
