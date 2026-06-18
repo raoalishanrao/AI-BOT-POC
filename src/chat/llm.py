@@ -44,19 +44,27 @@ def _is_retryable_llm_error(exc: Exception) -> bool:
         "InternalServerError",
         "ServiceUnavailableError",
         "APITimeoutError",
+        "APIStatusError",
     }:
         return True
 
     status_code = getattr(exc, "status_code", None)
-    if status_code in {429, 500, 502, 503, 529}:
+    if status_code in {413, 429, 500, 502, 503, 529}:
         return True
 
     response = getattr(exc, "response", None)
-    if response is not None and getattr(response, "status_code", None) in {429, 500, 502, 503, 529}:
+    if response is not None and getattr(response, "status_code", None) in {413, 429, 500, 502, 503, 529}:
         return True
 
     message = str(exc).lower()
-    return "rate limit" in message or "quota" in message or "overloaded" in message
+    return (
+        "rate limit" in message
+        or "quota" in message
+        or "overloaded" in message
+        or "request too large" in message
+        or "tokens per minute" in message
+        or "tokens per day" in message
+    )
 
 
 def _gemini_generate(*, system: str, prompt: str, temperature: float | None = None) -> str:
@@ -71,7 +79,7 @@ def _gemini_generate(*, system: str, prompt: str, temperature: float | None = No
         gen_config["temperature"] = temperature
 
     response = client.models.generate_content(
-        model=active_chat_model(),
+        model=config.GEMINI_CHAT_MODEL,
         contents=prompt,
         config=gen_config,
     )
@@ -154,12 +162,18 @@ def _groq_generate_with_fallback(
 
     for model in models:
         try:
-            return _groq_generate(system=system, prompt=prompt, model=model, temperature=temperature)
+            log.info("Trying Groq chat model: %s", model)
+            result = _groq_generate(system=system, prompt=prompt, model=model, temperature=temperature)
+            log.info("Groq chat succeeded with model: %s", model)
+            return result
         except Exception as exc:
             if not _is_retryable_llm_error(exc):
+                log.error("Groq model %s failed with non-retryable error: %s", model, exc)
                 raise
             last_error = exc
             log.warning("Groq model %s failed (%s), trying next model...", model, exc)
+
+    log.error("All Groq chat models exhausted: %s", ", ".join(models))
 
     if last_error is not None:
         raise last_error
@@ -171,12 +185,18 @@ def _groq_generate_json_with_fallback(prompt: str, models: list[str]) -> str:
 
     for model in models:
         try:
-            return _groq_generate_json(prompt, model=model)
+            log.info("Trying Groq profile model: %s", model)
+            result = _groq_generate_json(prompt, model=model)
+            log.info("Groq profile succeeded with model: %s", model)
+            return result
         except Exception as exc:
             if not _is_retryable_llm_error(exc):
+                log.error("Groq profile model %s failed with non-retryable error: %s", model, exc)
                 raise
             last_error = exc
             log.warning("Groq profile model %s failed (%s), trying next model...", model, exc)
+
+    log.error("All Groq profile models exhausted: %s", ", ".join(models))
 
     if last_error is not None:
         raise last_error
@@ -194,7 +214,11 @@ def generate_text(*, system: str, prompt: str, temperature: float | None = None)
             )
         except Exception as exc:
             if config.CHAT_FALLBACK_TO_GEMINI and config.GEMINI_API_KEY and _is_retryable_llm_error(exc):
-                log.warning("All Groq chat models failed, falling back to Gemini: %s", exc)
+                log.warning(
+                    "All Groq chat models failed, falling back to Gemini (%s): %s",
+                    config.GEMINI_CHAT_MODEL,
+                    exc,
+                )
                 return _gemini_generate(system=system, prompt=prompt, temperature=temperature)
             raise
     return _gemini_generate(system=system, prompt=prompt, temperature=temperature)
